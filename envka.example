@@ -1,0 +1,19 @@
+# # ── Supabase ──────────────────────────────
+# NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+# NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+# SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+
+# # ── Email (Nodemailer / SMTP) ─────────────
+# SMTP_HOST=smtp.gmail.com
+# SMTP_PORT=587
+# SMTP_USER=your@gmail.com
+# SMTP_PASS=your-app-password
+# EMAIL_FROM=NOYR <noreply@noyr.in>
+
+# # ── Admin ─────────────────────────────────
+# ADMIN_PASSWORD=noyr2025
+# ADMIN_SECRET=supersecretjwtsecret
+
+# # ── Store config ──────────────────────────
+# NEXT_PUBLIC_UPI_ID=noyr@upi
+# NEXT_PUBLIC_STORE_NAME=NOYR

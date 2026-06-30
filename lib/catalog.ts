@@ -1,20 +1,22 @@
 /**
  * lib/catalog.ts
- * Client-side localStorage store for products + collections.
- * Mirrors the lib/orders.ts pattern so admin edits are instant
- * and survive a page refresh without Supabase being configured.
+ * Catalog store — Supabase-first, localStorage fallback.
  *
- * On first load the store seeds itself from data/products.ts so the
- * admin always has something to work with out of the box.
+ * All mutations go through /api/catalog/* which writes to Supabase
+ * (when configured) AND keeps localStorage in sync so the UI is instant.
+ *
+ * Reads on the storefront come from /api/catalog/* so they always reflect
+ * the real database.
  */
 
 import { Product, Collection, Variant } from '@/types';
 import { products as SEED_PRODUCTS, collections as SEED_COLLECTIONS } from '@/data/products';
 
-const PRODUCTS_KEY   = 'noyr_catalog_products';
+const PRODUCTS_KEY    = 'noyr_catalog_products';
 const COLLECTIONS_KEY = 'noyr_catalog_collections';
+const ADMIN_KEY       = process.env.NEXT_PUBLIC_ADMIN_PASSWORD ?? 'noyr2025';
 
-/* ─── helpers ─────────────────────────────────────────────────────── */
+/* ─── localStorage helpers ────────────────────────────────────────── */
 
 function readJSON<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
@@ -37,7 +39,7 @@ function uid(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-/* ─── products ────────────────────────────────────────────────────── */
+/* ─── seed / local reads ──────────────────────────────────────────── */
 
 export function getLocalProducts(): Product[] {
   const stored = readJSON<Product[] | null>(PRODUCTS_KEY, null);
@@ -51,6 +53,56 @@ export function getLocalProducts(): Product[] {
 export function saveLocalProducts(products: Product[]): void {
   writeJSON(PRODUCTS_KEY, products);
 }
+
+export function getLocalCollections(): Collection[] {
+  const stored = readJSON<Collection[] | null>(COLLECTIONS_KEY, null);
+  if (!stored) {
+    writeJSON(COLLECTIONS_KEY, SEED_COLLECTIONS);
+    return SEED_COLLECTIONS;
+  }
+  return stored;
+}
+
+export function saveLocalCollections(collections: Collection[]): void {
+  writeJSON(COLLECTIONS_KEY, collections);
+}
+
+/* ─── API-backed fetches (admin uses these) ───────────────────────── */
+
+export async function fetchProducts(): Promise<Product[]> {
+  try {
+    const res = await fetch('/api/catalog/products', {
+      headers: { 'x-admin-key': ADMIN_KEY },
+      cache: 'no-store',
+    });
+    if (!res.ok) throw new Error('api error');
+    const { products, source } = await res.json();
+    if (source === 'supabase' && Array.isArray(products)) {
+      // keep localStorage in sync
+      writeJSON(PRODUCTS_KEY, products);
+      return products;
+    }
+  } catch {}
+  return getLocalProducts();
+}
+
+export async function fetchCollections(): Promise<Collection[]> {
+  try {
+    const res = await fetch('/api/catalog/collections', {
+      headers: { 'x-admin-key': ADMIN_KEY },
+      cache: 'no-store',
+    });
+    if (!res.ok) throw new Error('api error');
+    const { collections, source } = await res.json();
+    if (source === 'supabase' && Array.isArray(collections)) {
+      writeJSON(COLLECTIONS_KEY, collections);
+      return collections;
+    }
+  } catch {}
+  return getLocalCollections();
+}
+
+/* ─── products CRUD ───────────────────────────────────────────────── */
 
 export function createLocalProduct(data: Omit<Product, 'id' | 'variants'>): Product {
   const products = getLocalProducts();
@@ -82,20 +134,7 @@ export function deleteLocalProduct(id: string): boolean {
   return true;
 }
 
-/* ─── collections ─────────────────────────────────────────────────── */
-
-export function getLocalCollections(): Collection[] {
-  const stored = readJSON<Collection[] | null>(COLLECTIONS_KEY, null);
-  if (!stored) {
-    writeJSON(COLLECTIONS_KEY, SEED_COLLECTIONS);
-    return SEED_COLLECTIONS;
-  }
-  return stored;
-}
-
-export function saveLocalCollections(collections: Collection[]): void {
-  writeJSON(COLLECTIONS_KEY, collections);
-}
+/* ─── collections CRUD ────────────────────────────────────────────── */
 
 export function createLocalCollection(data: Partial<Collection>): Collection {
   const collections = getLocalCollections();
@@ -130,31 +169,20 @@ export function deleteLocalCollection(id: string): boolean {
   return true;
 }
 
-/* ─── variants ────────────────────────────────────────────────────── */
+/* ─── variants CRUD ───────────────────────────────────────────────── */
 
 export function addVariantToProduct(productId: string, data: Omit<Variant, 'id' | 'product_id'>): Variant | null {
   const products = getLocalProducts();
   const idx = products.findIndex(p => p.id === productId);
   if (idx === -1) return null;
-  const variant: Variant = {
-    ...data,
-    id: `v-${uid()}`,
-    product_id: productId,
-  };
+  const variant: Variant = { ...data, id: `v-${uid()}`, product_id: productId };
   products[idx] = { ...products[idx], variants: [...products[idx].variants, variant] };
   saveLocalProducts(products);
   return variant;
 }
 
 export function updateVariantStock(productId: string, variantId: string, stock: number): boolean {
-  const products = getLocalProducts();
-  const pIdx = products.findIndex(p => p.id === productId);
-  if (pIdx === -1) return false;
-  const vIdx = products[pIdx].variants.findIndex(v => v.id === variantId);
-  if (vIdx === -1) return false;
-  products[pIdx].variants[vIdx] = { ...products[pIdx].variants[vIdx], stock };
-  saveLocalProducts(products);
-  return true;
+  return updateVariant(productId, variantId, { stock });
 }
 
 export function updateVariant(productId: string, variantId: string, changes: Partial<Variant>): boolean {

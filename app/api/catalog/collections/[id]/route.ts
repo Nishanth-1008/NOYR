@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-function auth(req: NextRequest) {
-  const key = req.headers.get('x-admin-key');
-  return key === process.env.ADMIN_SECRET || key === process.env.ADMIN_PASSWORD || key === (process.env.NEXT_PUBLIC_ADMIN_PASSWORD ?? 'noyr2025');
-}
+import { isAdminAuthed } from '@/lib/admin-auth';
 
 export async function PATCH(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
-  if (!auth(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!isAdminAuthed(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   try {
-    const changes = await req.json();
+    const body = await req.json();
+    const { id: _id, created_at: _createdAt, ...changes } = body;
+  
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (supabaseUrl) {
       const { getSupabaseAdmin } = await import('@/lib/supabase-server');
@@ -19,23 +17,28 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       return NextResponse.json({ collection: data });
     }
     return NextResponse.json({ ok: true });
-  } catch {
+  } catch (err) {
+    console.error('[catalog/collections/[id] PATCH]', err);
     return NextResponse.json({ error: 'Failed' }, { status: 500 });
   }
 }
 
 export async function DELETE(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
-  if (!auth(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!isAdminAuthed(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   try {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (supabaseUrl) {
       const { getSupabaseAdmin } = await import('@/lib/supabase-server');
       const db = getSupabaseAdmin() as any;
-      await db.from('collections').delete().eq('id', id);
+      // Detach products from this collection first (collection_id is nullable now)
+      await db.from('products').update({ collection_id: null }).eq('collection_id', id);
+      const { error } = await db.from('collections').delete().eq('id', id);
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
     }
     return NextResponse.json({ ok: true });
-  } catch {
+  } catch (err) {
+    console.error('[catalog/collections/[id] DELETE]', err);
     return NextResponse.json({ error: 'Failed' }, { status: 500 });
   }
 }

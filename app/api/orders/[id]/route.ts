@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isAdminAuthed } from '@/lib/admin-auth';
 
 export async function PATCH(
   req: NextRequest,
@@ -6,11 +7,7 @@ export async function PATCH(
 ) {
   const { id } = await context.params;
 
-  const authHeader = req.headers.get('x-admin-key');
-  if (
-    authHeader !== process.env.ADMIN_SECRET &&
-    authHeader !== process.env.ADMIN_PASSWORD
-  ) {
+  if (!isAdminAuthed(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

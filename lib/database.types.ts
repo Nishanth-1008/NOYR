@@ -27,12 +27,17 @@ export interface Database {
           price: number;
           images: string[];
           category: string;
-          collection_id: string;
+          collection_id: string | null;
           active: boolean;
+          limited: boolean;
+          drop_date: string | null;
           details: string[];
           created_at: string;
         };
-        Insert: Omit<Database['public']['Tables']['products']['Row'], 'created_at'>;
+        Insert: Omit<Database['public']['Tables']['products']['Row'], 'created_at' | 'limited' | 'drop_date'> & {
+          limited?: boolean;
+          drop_date?: string | null;
+        };
         Update: Partial<Database['public']['Tables']['products']['Insert']>;
       };
       variants: {
@@ -61,6 +66,7 @@ export interface Database {
           status: 'pending' | 'payment_received' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
           payment_status: 'pending' | 'submitted' | 'verified' | 'failed';
           notes: string | null;
+          tracking_id: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -109,6 +115,22 @@ export interface Database {
         };
         Insert: Omit<Database['public']['Tables']['journal_posts']['Row'], 'created_at' | 'updated_at'>;
         Update: Partial<Database['public']['Tables']['journal_posts']['Insert']>;
+      };
+      coupons: {
+        Row: {
+          code: string;
+          type: 'percent' | 'flat';
+          value: number;
+          max_uses: number;
+          used_count: number;
+          active: boolean;
+          expires_at: string;
+          created_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['coupons']['Row'], 'created_at' | 'used_count'> & {
+          used_count?: number;
+        };
+        Update: Partial<Database['public']['Tables']['coupons']['Insert']>;
       };
     };
   };

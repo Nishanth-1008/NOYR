@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { ArrowUpRight, ChevronRight } from 'lucide-react';
-import { products } from '@/data/products';
+import { Product } from '@/types';
+import { useStorefrontCatalog } from '@/lib/useStorefrontCatalog';
 
 /* ── Question flow ── */
 const STEPS = [
@@ -41,7 +42,7 @@ const STEPS = [
 ];
 
 /* ── Recommendation logic ── */
-function getRecommendations(answers: Record<string, string>) {
+function getRecommendations(answers: Record<string, string>, products: Product[]) {
   const { vibe, anchor } = answers;
   
   let recs = products.filter(p => p.active);
@@ -102,12 +103,13 @@ function OptionBtn({ option, selected, onSelect }: {
 }
 
 export default function BuildLookPage() {
+  const { products } = useStorefrontCatalog();
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [step, setStep] = useState(0);
   const [done, setDone] = useState(false);
 
   const currentStep = STEPS[step];
-  const recs = done ? getRecommendations(answers) : [];
+  const recs = done ? getRecommendations(answers, products) : [];
   const progress = ((step) / STEPS.length) * 100;
 
   const formatPrice = (p: number) =>

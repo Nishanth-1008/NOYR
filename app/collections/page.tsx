@@ -4,9 +4,11 @@ import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { ArrowRight } from 'lucide-react';
 import ProductCard from '@/components/ProductCard';
-import { products, collections } from '@/data/products';
+import { useStorefrontCatalog } from '@/lib/useStorefrontCatalog';
 
 export default function CollectionsPage() {
+  const { products, collections, loading } = useStorefrontCatalog();
+
   return (
     <div className="bg-black min-h-screen pt-24">
       {/* Header */}
@@ -21,9 +23,16 @@ export default function CollectionsPage() {
         </motion.div>
       </div>
 
+      {loading && (
+        <div className="max-w-7xl mx-auto px-6 py-20 text-center">
+          <p className="text-white/20 text-xs tracking-widest">LOADING…</p>
+        </div>
+      )}
+
       {/* Collection sections */}
       {collections.map((col, ci) => {
         const colProducts = products.filter(p => p.collection_id === col.id && p.active);
+        if (colProducts.length === 0) return null;
         return (
           <section key={col.id} className="max-w-7xl mx-auto px-6 py-20">
             <motion.div
@@ -54,6 +63,24 @@ export default function CollectionsPage() {
           </section>
         );
       })}
+
+      {/* Products with no collection assigned */}
+      {(() => {
+        const orphan = products.filter(p => p.active && !p.collection_id);
+        if (orphan.length === 0) return null;
+        return (
+          <section className="max-w-7xl mx-auto px-6 py-20">
+            <div className="mb-10">
+              <h2 className="font-display text-3xl font-black text-white tracking-widest">MORE PIECES</h2>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+              {orphan.map((product, i) => (
+                <ProductCard key={product.id} product={product} index={i} />
+              ))}
+            </div>
+          </section>
+        );
+      })()}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Order } from '@/types';
 import { sendOrderConfirmation, sendAdminNotification } from '@/lib/email';
+import { isAdminAuthed } from '@/lib/admin-auth';
 
 export async function POST(req: NextRequest) {
   try {
@@ -71,11 +72,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get('x-admin-key');
-  if (
-    authHeader !== process.env.ADMIN_SECRET &&
-    authHeader !== process.env.ADMIN_PASSWORD
-  ) {
+  if (!isAdminAuthed(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

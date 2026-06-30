@@ -10,11 +10,12 @@ import {
   AlertTriangle, Tag,
 } from 'lucide-react';
 import { Order, Product, Collection, Variant } from '@/types';
-import { getLocalOrders, updateLocalOrder } from '@/lib/orders';
+import { updateLocalOrder, fetchOrders } from '@/lib/orders';
 import {
-  getLocalProducts, createLocalProduct, updateLocalProduct, deleteLocalProduct,
-  getLocalCollections, createLocalCollection, updateLocalCollection, deleteLocalCollection,
+  createLocalProduct, updateLocalProduct, deleteLocalProduct,
+  createLocalCollection, updateLocalCollection, deleteLocalCollection,
   addVariantToProduct, updateVariant, deleteVariant,
+  fetchProducts, fetchCollections,
 } from '@/lib/catalog';
 
 /* ─── types ─────────────────────────────────────────────────────── */
@@ -144,30 +145,43 @@ function ProductForm({
   const set = (k: keyof Product) => (v: string | boolean | number) =>
     setForm(f => ({ ...f, [k]: v }));
 
+  const [saveError, setSaveError] = useState('');
+
   const handleSave = async () => {
     if (!form.title || !form.price) return;
     setSaving(true);
+    setSaveError('');
     const payload: Partial<Product> = {
       ...form,
       images: imagesText.split('\n').map(s => s.trim()).filter(Boolean),
       details: detailsText.split('\n').map(s => s.trim()).filter(Boolean),
     };
-    let result: Product | null;
-    if (isNew) {
-      result = createLocalProduct(payload as Omit<Product, 'id' | 'variants'>);
-    } else {
-      result = updateLocalProduct(product!.id, payload);
-    }
-    if (result) {
-      // fire-and-forget API sync
+
+    try {
       const method = isNew ? 'POST' : 'PATCH';
-      const url = isNew ? '/api/catalog/products' : `/api/catalog/products/${result.id}`;
-      fetch(url, {
+      const url = isNew ? '/api/catalog/products' : `/api/catalog/products/${product!.id}`;
+      const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json', 'x-admin-key': 'noyr2025' },
-        body: JSON.stringify(result),
-      }).catch(() => {});
-      onSave(result);
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setSaveError(json.error ?? 'Failed to save to database');
+        setSaving(false);
+        return;
+      }
+      const serverProduct: Product = json.product;
+      // Keep the local cache in sync too, so storefront pages without
+      // Supabase configured still see something sane.
+      if (isNew) {
+        createLocalProduct({ ...serverProduct } as Omit<Product, 'id' | 'variants'>);
+      } else {
+        updateLocalProduct(product!.id, serverProduct);
+      }
+      onSave(serverProduct);
+    } catch (err) {
+      setSaveError('Network error — could not reach the server.');
     }
     setSaving(false);
   };
@@ -192,6 +206,10 @@ function ProductForm({
           </Btn>
         </div>
       </div>
+
+      {saveError && (
+        <p className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 px-3 py-2">{saveError}</p>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         <Input label="TITLE" value={form.title ?? ''} onChange={v => { set('title')(v); set('slug')(v.toLowerCase().replace(/[^a-z0-9]+/g, '-')); }} className="col-span-2" />
@@ -281,26 +299,37 @@ function CollectionForm({
   const set = (k: keyof Collection) => (v: string) =>
     setForm(f => ({ ...f, [k]: v }));
 
+  const [saveError, setSaveError] = useState('');
+
   const linkedProducts = products.filter(p => p.collection_id === collection?.id);
 
   const handleSave = async () => {
     if (!form.title) return;
     setSaving(true);
-    let result: Collection | null;
-    if (isNew) {
-      result = createLocalCollection(form);
-    } else {
-      result = updateLocalCollection(collection!.id, form);
-    }
-    if (result) {
+    setSaveError('');
+    try {
       const method = isNew ? 'POST' : 'PATCH';
-      const url = isNew ? '/api/catalog/collections' : `/api/catalog/collections/${result.id}`;
-      fetch(url, {
+      const url = isNew ? '/api/catalog/collections' : `/api/catalog/collections/${collection!.id}`;
+      const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json', 'x-admin-key': 'noyr2025' },
-        body: JSON.stringify(result),
-      }).catch(() => {});
-      onSave(result);
+        body: JSON.stringify(form),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setSaveError(json.error ?? 'Failed to save to database');
+        setSaving(false);
+        return;
+      }
+      const serverCollection: Collection = json.collection;
+      if (isNew) {
+        createLocalCollection({ ...serverCollection });
+      } else {
+        updateLocalCollection(collection!.id, serverCollection);
+      }
+      onSave(serverCollection);
+    } catch {
+      setSaveError('Network error — could not reach the server.');
     }
     setSaving(false);
   };
@@ -325,6 +354,10 @@ function CollectionForm({
           </Btn>
         </div>
       </div>
+
+      {saveError && (
+        <p className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 px-3 py-2">{saveError}</p>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         <Input label="TITLE" value={form.title ?? ''} onChange={v => { set('title')(v); set('slug')(v.toLowerCase().replace(/[^a-z0-9]+/g, '-')); }} className="col-span-2" />
@@ -365,7 +398,7 @@ function CollectionForm({
 
 /* ─── StockTab ───────────────────────────────────────────────────── */
 
-function StockTab({ products, onRefresh, adminKey }: { products: Product[]; onRefresh: () => void; adminKey: string }) {
+function StockTab({ products, onRefresh, adminKey }: { products: Product[]; onRefresh: () => void | Promise<void>; adminKey: string }) {
   const [filterProductId, setFilterProductId] = useState('all');
   const [showOOS, setShowOOS] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
@@ -386,14 +419,16 @@ function StockTab({ products, onRefresh, adminKey }: { products: Product[]; onRe
     const stock = Number(stockStr);
     setSaving(variantId);
     updateVariant(productId, variantId, { stock });
-    fetch('/api/catalog/variants', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
-      body: JSON.stringify({ variant_id: variantId, product_id: productId, stock, notify_restock: notifyRestock }),
-    }).catch(() => {});
+    try {
+      await fetch('/api/catalog/variants', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
+        body: JSON.stringify({ variant_id: variantId, product_id: productId, stock, notify_restock: notifyRestock }),
+      });
+    } catch {}
     if (notifyRestock) { setNotifying(variantId); setTimeout(() => setNotifying(null), 2000); }
     setEditStocks(s => { const n = { ...s }; delete n[variantId]; return n; });
-    onRefresh();
+    await onRefresh();
     setSaving(null);
   };
 
@@ -622,40 +657,90 @@ interface Coupon {
   expiresAt: string;
 }
 
-function CouponsTab() {
+function CouponsTab({ adminKey }: { adminKey: string }) {
   const [coupons, setCoupons] = useState<Coupon[]>(() => {
     try { return JSON.parse(localStorage.getItem(COUPON_STORAGE_KEY) ?? '[]'); } catch { return []; }
   });
   const [form, setForm] = useState({ code: '', type: 'percent' as 'percent'|'flat', value: 10, maxUses: 100, expiresAt: '' });
   const [adding, setAdding] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const save = (next: Coupon[]) => {
+  // Maps a Supabase coupons row (snake_case) to the admin UI's Coupon shape (camelCase)
+  const fromServer = (row: any): Coupon => ({
+    code: row.code,
+    type: row.type,
+    value: Number(row.value),
+    maxUses: row.max_uses,
+    usedCount: row.used_count,
+    active: row.active,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+  });
+
+  const cacheLocal = (next: Coupon[]) => {
     setCoupons(next);
     localStorage.setItem(COUPON_STORAGE_KEY, JSON.stringify(next));
   };
 
-  const addCoupon = () => {
+  const loadCoupons = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/coupons', { headers: { 'x-admin-key': adminKey }, cache: 'no-store' });
+      const json = await res.json();
+      if (json.source === 'supabase' && Array.isArray(json.coupons)) {
+        cacheLocal(json.coupons.map(fromServer));
+      }
+    } catch {
+      // keep whatever's cached locally
+    }
+    setLoading(false);
+  }, [adminKey]);
+
+  useEffect(() => { loadCoupons(); }, [loadCoupons]);
+
+  const addCoupon = async () => {
     if (!form.code.trim()) return;
-    const c: Coupon = {
-      code: form.code.toUpperCase().trim(),
-      type: form.type,
-      value: form.value,
-      maxUses: form.maxUses,
-      usedCount: 0,
-      active: true,
-      createdAt: new Date().toISOString(),
-      expiresAt: form.expiresAt || new Date(Date.now() + 30 * 86400000).toISOString().slice(0,10),
-    };
-    save([c, ...coupons]);
+    try {
+      const res = await fetch('/api/coupons', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
+        body: JSON.stringify({
+          code: form.code, type: form.type, value: form.value,
+          maxUses: form.maxUses, expiresAt: form.expiresAt,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok && json.coupon) {
+        cacheLocal([fromServer(json.coupon), ...coupons]);
+      }
+    } catch {}
     setForm({ code: '', type: 'percent', value: 10, maxUses: 100, expiresAt: '' });
     setAdding(false);
   };
 
-  const toggleActive = (code: string) =>
-    save(coupons.map(c => c.code === code ? { ...c, active: !c.active } : c));
+  const toggleActive = async (code: string) => {
+    const target = coupons.find(c => c.code === code);
+    if (!target) return;
+    const nextActive = !target.active;
+    cacheLocal(coupons.map(c => c.code === code ? { ...c, active: nextActive } : c));
+    try {
+      await fetch('/api/coupons', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
+        body: JSON.stringify({ code, active: nextActive }),
+      });
+    } catch {}
+  };
 
-  const deleteCoupon = (code: string) =>
-    save(coupons.filter(c => c.code !== code));
+  const deleteCoupon = async (code: string) => {
+    cacheLocal(coupons.filter(c => c.code !== code));
+    try {
+      await fetch(`/api/coupons?code=${encodeURIComponent(code)}`, {
+        method: 'DELETE',
+        headers: { 'x-admin-key': adminKey },
+      });
+    } catch {}
+  };
 
   return (
     <div>
@@ -829,14 +914,31 @@ export default function AdminPage() {
   const ADMIN_PASS = process.env.NEXT_PUBLIC_ADMIN_PASSWORD ?? 'noyr2025';
 
   /* ── loaders ────────────────────────────────────────────────────── */
-  const loadOrders      = useCallback(() => setOrders(getLocalOrders()), []);
-  const loadProducts    = useCallback(() => setProducts(getLocalProducts()), []);
-  const loadCollections = useCallback(() => setCollections(getLocalCollections()), []);
+  const [loadingCatalog, setLoadingCatalog] = useState(false);
+
+  const loadOrders = useCallback(async () => {
+    const data = await fetchOrders();
+    setOrders(data);
+  }, []);
+  const loadProducts = useCallback(async () => {
+    const data = await fetchProducts();
+    setProducts(data);
+  }, []);
+  const loadCollections = useCallback(async () => {
+    const data = await fetchCollections();
+    setCollections(data);
+  }, []);
+
+  const loadAll = useCallback(async () => {
+    setLoadingCatalog(true);
+    await Promise.all([loadOrders(), loadProducts(), loadCollections()]);
+    setLoadingCatalog(false);
+  }, [loadOrders, loadProducts, loadCollections]);
 
   useEffect(() => {
     if (!authed) return;
-    loadOrders(); loadProducts(); loadCollections();
-  }, [authed, loadOrders, loadProducts, loadCollections]);
+    loadAll();
+  }, [authed, loadAll]);
 
   /* ── order helpers ────────────────────────────────────────────────── */
   const filtered = orders.filter(o => {
@@ -854,14 +956,22 @@ export default function AdminPage() {
 
   const updateOrder = async (id: string, changes: Partial<Order>) => {
     setSaving(true);
+    // optimistic local update for snappy UI
     const updated = updateLocalOrder(id, changes);
-    if (updated) {
-      setOrders(getLocalOrders()); setSelected(updated);
-      fetch(`/api/orders/${id}`, {
+    if (updated) setSelected(updated);
+    try {
+      const res = await fetch(`/api/orders/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'x-admin-key': ADMIN_PASS },
         body: JSON.stringify({ ...changes, tracking_id: tracking || undefined }),
-      }).catch(() => {});
+      });
+      if (res.ok) {
+        await loadOrders();
+        const fresh = (await fetchOrders()).find(o => o.id === id);
+        if (fresh) setSelected(fresh);
+      }
+    } catch {
+      // Supabase not configured / request failed — local update already applied
     }
     setSaving(false);
   };
@@ -924,9 +1034,9 @@ export default function AdminPage() {
             <p className="text-white/20 text-xs tracking-[0.3em] mt-1">NOYR CONTROL PANEL</p>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => { loadOrders(); loadProducts(); loadCollections(); }}
+            <button onClick={() => loadAll()}
               className="text-white/30 hover:text-white transition-colors p-2 border border-white/10 hover:border-white/30">
-              <RefreshCw size={14} />
+              <RefreshCw size={14} className={loadingCatalog ? 'animate-spin' : ''} />
             </button>
             <button onClick={() => setAuthed(false)}
               className="text-white/30 hover:text-white transition-colors p-2 border border-white/10 hover:border-white/30">
@@ -1151,7 +1261,7 @@ export default function AdminPage() {
                 <ProductForm
                   product={null}
                   collections={collections}
-                  onSave={p => { setProducts(getLocalProducts()); setSelectedProduct(p); setNewProduct(false); }}
+                  onSave={async p => { await loadProducts(); setSelectedProduct(p); setNewProduct(false); }}
                   onDelete={() => {}}
                   onClose={() => setNewProduct(false)}
                 />
@@ -1160,8 +1270,15 @@ export default function AdminPage() {
                   key={selectedProduct.id}
                   product={selectedProduct}
                   collections={collections}
-                  onSave={p => { setProducts(getLocalProducts()); setSelectedProduct(p); }}
-                  onDelete={id => { deleteLocalProduct(id); fetch(`/api/catalog/products/${id}`, { method: 'DELETE', headers: { 'x-admin-key': ADMIN_PASS } }).catch(() => {}); setProducts(getLocalProducts()); setSelectedProduct(null); }}
+                  onSave={async p => { await loadProducts(); setSelectedProduct(p); }}
+                  onDelete={async id => {
+                    deleteLocalProduct(id);
+                    try {
+                      await fetch(`/api/catalog/products/${id}`, { method: 'DELETE', headers: { 'x-admin-key': ADMIN_PASS } });
+                    } catch {}
+                    await loadProducts();
+                    setSelectedProduct(null);
+                  }}
                   onClose={() => setSelectedProduct(null)}
                 />
               ) : (
@@ -1212,7 +1329,7 @@ export default function AdminPage() {
                 <CollectionForm
                   collection={null}
                   products={products}
-                  onSave={c => { setCollections(getLocalCollections()); setSelectedCollection(c); setNewCollection(false); }}
+                  onSave={async c => { await loadCollections(); setSelectedCollection(c); setNewCollection(false); }}
                   onDelete={() => {}}
                 />
               ) : selectedCollection ? (
@@ -1220,11 +1337,13 @@ export default function AdminPage() {
                   key={selectedCollection.id}
                   collection={selectedCollection}
                   products={products}
-                  onSave={c => { setCollections(getLocalCollections()); setSelectedCollection(c); }}
-                  onDelete={id => {
+                  onSave={async c => { await loadCollections(); setSelectedCollection(c); }}
+                  onDelete={async id => {
                     deleteLocalCollection(id);
-                    fetch(`/api/catalog/collections/${id}`, { method: 'DELETE', headers: { 'x-admin-key': ADMIN_PASS } }).catch(() => {});
-                    setCollections(getLocalCollections());
+                    try {
+                      await fetch(`/api/catalog/collections/${id}`, { method: 'DELETE', headers: { 'x-admin-key': ADMIN_PASS } });
+                    } catch {}
+                    await Promise.all([loadCollections(), loadProducts()]);
                     setSelectedCollection(null);
                   }}
                 />
@@ -1254,7 +1373,7 @@ export default function AdminPage() {
         )}
 
         {/* ── COUPONS TAB ────────────────────────────────────────── */}
-        {tab === 'coupons' && <CouponsTab />}
+        {tab === 'coupons' && <CouponsTab adminKey={ADMIN_PASS} />}
 
         {/* ── AUDIT LOG TAB ──────────────────────────────────────── */}
         {tab === 'audit' && <AuditTab orders={orders} />}

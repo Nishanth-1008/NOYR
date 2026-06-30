@@ -4,13 +4,24 @@ import { useParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { notFound } from 'next/navigation';
 import ProductCard from '@/components/ProductCard';
-import { getCollectionBySlug, getProductsByCollection } from '@/data/products';
+import { useStorefrontCatalog, getCollectionBySlugFrom, getProductsByCollectionFrom } from '@/lib/useStorefrontCatalog';
 
 export default function CollectionPage() {
   const { slug } = useParams<{ slug: string }>();
-  const collection = getCollectionBySlug(slug);
-  if (!collection) return notFound();
-  const colProducts = getProductsByCollection(collection.id);
+  const { products, collections, loading } = useStorefrontCatalog();
+
+  const collection = getCollectionBySlugFrom(collections, slug);
+
+  if (!loading && !collection) return notFound();
+  if (loading || !collection) {
+    return (
+      <div className="bg-black min-h-screen pt-24 flex items-center justify-center">
+        <p className="text-white/20 text-xs tracking-widest">LOADING…</p>
+      </div>
+    );
+  }
+
+  const colProducts = getProductsByCollectionFrom(products, collection.id);
 
   return (
     <div className="bg-black min-h-screen pt-24">
@@ -47,11 +58,15 @@ export default function CollectionPage() {
 
       {/* Products */}
       <div className="max-w-7xl mx-auto px-6 py-16">
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-          {colProducts.map((product, i) => (
-            <ProductCard key={product.id} product={product} index={i} />
-          ))}
-        </div>
+        {colProducts.length === 0 ? (
+          <p className="text-white/20 text-sm tracking-widest text-center py-12">NO PRODUCTS IN THIS COLLECTION YET</p>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            {colProducts.map((product, i) => (
+              <ProductCard key={product.id} product={product} index={i} />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -4,7 +4,20 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { Bell, ArrowUpRight, Lock, Clock } from 'lucide-react';
-import { products } from '@/data/products';
+import { useStorefrontCatalog } from '@/lib/useStorefrontCatalog';
+
+interface Drop {
+  id: string;
+  name: string;
+  slug: string | null;
+  collection: string;
+  drop_date: string;
+  type: 'RESTOCK' | 'NEW DROP' | 'COLLECTION';
+  description: string;
+  units: number | null;
+  price: number | null;
+  status: 'upcoming' | 'teaser';
+}
 
 /* ── Synthetic upcoming drops ── */
 const UPCOMING_DROPS = [
@@ -44,7 +57,7 @@ const UPCOMING_DROPS = [
     price: null,
     status: 'teaser',
   },
-];
+] as const satisfies readonly Drop[];
 
 function useCountdown(dateStr: string) {
   const [now] = useState(() => new Date());
@@ -67,7 +80,7 @@ function CountdownUnit({ value, label }: { value: number; label: string }) {
   );
 }
 
-function DropCard({ drop, index }: { drop: typeof UPCOMING_DROPS[0]; index: number }) {
+function DropCard({ drop, index }: { drop: Drop; index: number }) {
   const { days, hours, mins } = useCountdown(drop.drop_date);
   const [notifyEmail, setNotifyEmail] = useState('');
   const [notified, setNotified] = useState(false);
@@ -207,6 +220,26 @@ function DropCard({ drop, index }: { drop: typeof UPCOMING_DROPS[0]; index: numb
 }
 
 export default function DropsPage() {
+  const { products } = useStorefrontCatalog();
+
+  // Real, admin-managed limited drops (limited=true, drop_date in the future)
+  const realDrops = products
+    .filter(p => p.limited && p.drop_date && new Date(p.drop_date) > new Date())
+    .map(p => ({
+      id: p.id,
+      name: p.title,
+      slug: p.slug,
+      collection: p.category.toUpperCase(),
+      drop_date: p.drop_date!,
+      type: 'NEW DROP' as const,
+      description: p.description,
+      units: null,
+      price: p.price,
+      status: 'upcoming' as const,
+    }));
+
+  const allDrops = [...realDrops, ...UPCOMING_DROPS];
+
   return (
     <div className="bg-black min-h-screen">
       {/* Header */}
@@ -225,7 +258,7 @@ export default function DropsPage() {
       {/* Drops list */}
       <div className="max-w-[1200px] mx-auto px-8 md:px-16 py-16">
         <div className="flex flex-col gap-4">
-          {UPCOMING_DROPS.map((drop, i) => (
+          {allDrops.map((drop, i) => (
             <DropCard key={drop.id} drop={drop} index={i} />
           ))}
         </div>

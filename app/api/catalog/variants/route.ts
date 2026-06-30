@@ -1,12 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-function auth(req: NextRequest) {
-  const key = req.headers.get('x-admin-key');
-  return key === process.env.ADMIN_SECRET || key === process.env.ADMIN_PASSWORD || key === (process.env.NEXT_PUBLIC_ADMIN_PASSWORD ?? 'noyr2025');
-}
+import { isAdminAuthed } from '@/lib/admin-auth';
 
 export async function PATCH(req: NextRequest) {
-  if (!auth(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!isAdminAuthed(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   try {
     const body = await req.json();
     const { variant_id, product_id, stock, price, notify_restock } = body;

@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ShoppingBag, ChevronDown, ArrowRight, Heart } from 'lucide-react';
 import Link from 'next/link';
-import { getProductBySlug, products } from '@/data/products';
+import { useStorefrontCatalog, getProductBySlugFrom } from '@/lib/useStorefrontCatalog';
 import { useCart } from '@/components/CartContext';
 import { useWishlist } from '@/components/WishlistContext';
 import { Variant } from '@/types';
@@ -17,8 +17,8 @@ import DropCountdown from '@/components/DropCountdown';
 
 export default function ProductPage() {
   const { slug } = useParams<{ slug: string }>();
-  const product = getProductBySlug(slug);
-  if (!product) return notFound();
+  const { products, loading } = useStorefrontCatalog();
+  const product = getProductBySlugFrom(products, slug);
 
   const { addItem } = useCart();
   const { addItem: wishlistAdd, removeItem: wishlistRemove, isWishlisted } = useWishlist();
@@ -26,8 +26,17 @@ export default function ProductPage() {
   const [added, setAdded] = useState(false);
   const [activeImage, setActiveImage] = useState(0);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const wishlisted = isWishlisted(product.id);
 
+  if (!loading && !product) return notFound();
+  if (loading || !product) {
+    return (
+      <div className="bg-black min-h-screen pt-24 flex items-center justify-center">
+        <p className="text-white/20 text-xs tracking-widest">LOADING…</p>
+      </div>
+    );
+  }
+
+  const wishlisted = isWishlisted(product.id);
   const related = products.filter(p => p.id !== product.id && p.collection_id === product.collection_id).slice(0, 3);
 
   const handleAdd = () => {

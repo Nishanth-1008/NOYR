@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { motion, useScroll, useTransform, AnimatePresence } from 'framer-motion';
 import { useRef, useState, useEffect } from 'react';
 import { ArrowUpRight, Play, ChevronRight } from 'lucide-react';
-import { collections, products } from '@/data/products';
+import { useStorefrontCatalog } from '@/lib/useStorefrontCatalog';
 import ProductCard from '@/components/ProductCard';
 
 const Hero3D = dynamic(() => import('@/components/three/Hero3D'), {
@@ -97,6 +97,7 @@ function CollectionCard({ title, href, index }: { title: string; href: string; i
 }
 
 export default function HomePage() {
+  const { products, collections } = useStorefrontCatalog();
   const containerRef = useRef<HTMLDivElement>(null);
   const { scrollYProgress } = useScroll({ target: containerRef });
   const heroY = useTransform(scrollYProgress, [0, 0.4], ['0%', '25%']);
@@ -383,7 +384,7 @@ export default function HomePage() {
           </Link>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {products.map((p, i) => <ProductCard key={p.id} product={p} index={i} />)}
+          {products.slice(0, 8).map((p, i) => <ProductCard key={p.id} product={p} index={i} />)}
         </div>
       </section>
 

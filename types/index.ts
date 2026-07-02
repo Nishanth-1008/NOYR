@@ -57,6 +57,8 @@ export interface Order {
   notes?: string;
   tracking_id?: string;
   referral_code?: string;
+  coupon_code?: string;
+  user_id?: string;
 }
 
 export interface OrderItem {

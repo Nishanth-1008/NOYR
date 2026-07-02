@@ -47,7 +47,7 @@ function writeLocalOrders(orders: Order[]): void {
  * Normalizes a Supabase order row (with nested order_items / payments)
  * into the flat Order shape the rest of the app expects.
  */
-function normalizeSupabaseOrder(row: any): Order {
+export function normalizeSupabaseOrder(row: any): Order {
   return {
     id: row.id,
     customer_name: row.customer_name,

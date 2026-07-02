@@ -26,6 +26,7 @@ export async function POST(req: NextRequest) {
         status:         order.status,
         payment_status: order.payment_status,
         notes:          order.notes ?? null,
+        user_id:        order.user_id ?? null,
       });
       if (orderErr) throw orderErr;
 
@@ -52,6 +53,20 @@ export async function POST(req: NextRequest) {
           verified:        false,
           verified_at:     null,
         });
+      }
+
+      // Increment coupon / referral counts
+      if (order.referral_code) {
+        const { data: ref } = await db.from('referrals').select('uses').eq('code', order.referral_code.toUpperCase()).single();
+        if (ref) {
+          await db.from('referrals').update({ uses: (ref.uses || 0) + 1 }).eq('code', order.referral_code.toUpperCase());
+        }
+      }
+      if (order.coupon_code) {
+        const { data: coup } = await db.from('coupons').select('used_count').eq('code', order.coupon_code.toUpperCase()).single();
+        if (coup) {
+          await db.from('coupons').update({ used_count: (coup.used_count || 0) + 1 }).eq('code', order.coupon_code.toUpperCase());
+        }
       }
     }
 

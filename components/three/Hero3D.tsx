@@ -66,57 +66,88 @@ function CrystalShards() {
   );
 }
 
-function DarkOrb() {
-  const outerRef = useRef<THREE.Mesh>(null);
-  const crackRef = useRef<THREE.Mesh>(null);
+function HoodieMockup() {
+  const groupRef = useRef<THREE.Group>(null);
 
   useFrame(({ clock }) => {
     const t = clock.elapsedTime;
-    if (outerRef.current) {
-      outerRef.current.rotation.y = t * 0.055;
-      outerRef.current.rotation.z = Math.sin(t * 0.25) * 0.025;
-    }
-    if (crackRef.current) {
-      (crackRef.current.material as THREE.MeshBasicMaterial).opacity =
-        0.05 + Math.abs(Math.sin(t * 0.7)) * 0.07;
+    if (groupRef.current) {
+      groupRef.current.rotation.y = t * 0.25;
+      groupRef.current.rotation.z = Math.sin(t * 0.3) * 0.04;
     }
   });
 
   return (
-    <Float speed={0.55} rotationIntensity={0.08} floatIntensity={0.4}>
-      {/* outer shell */}
-      <mesh ref={outerRef}>
-        <sphereGeometry args={[2.3, 128, 128]} />
-        <MeshDistortMaterial
-          color="#060606"
-          roughness={0.05}
-          metalness={0.98}
-          distort={0.22}
-          speed={0.55}
-          envMapIntensity={5}
-          transparent
-          opacity={0.95}
-        />
-      </mesh>
-      {/* inner core */}
-      <mesh>
-        <sphereGeometry args={[1.95, 64, 64]} />
-        <MeshDistortMaterial
-          color="#0f0f0f"
-          roughness={0.35}
-          metalness={0.5}
-          distort={0.06}
-          speed={0.3}
-          envMapIntensity={0.8}
-          transparent
-          opacity={0.88}
-        />
-      </mesh>
-      {/* wireframe crack layer */}
-      <mesh ref={crackRef}>
-        <sphereGeometry args={[2.35, 22, 22]} />
-        <meshBasicMaterial color="#333333" wireframe transparent opacity={0.07} />
-      </mesh>
+    <Float speed={0.7} rotationIntensity={0.12} floatIntensity={0.5}>
+      <group ref={groupRef} position={[0, 0.4, 0]} scale={1.8}>
+        {/* Torso */}
+        <mesh position={[0, -0.2, 0]}>
+          <cylinderGeometry args={[0.7, 0.6, 1.4, 10]} />
+          <meshPhysicalMaterial
+            color="#070707"
+            roughness={0.22}
+            metalness={0.9}
+            envMapIntensity={3.5}
+            clearcoat={0.25}
+          />
+        </mesh>
+        
+        {/* Kangaroo Pocket */}
+        <mesh position={[0, -0.45, 0.53]} rotation={[0.08, 0, 0]}>
+          <boxGeometry args={[0.42, 0.26, 0.12]} />
+          <meshPhysicalMaterial
+            color="#040404"
+            roughness={0.28}
+            metalness={0.8}
+            envMapIntensity={3}
+          />
+        </mesh>
+
+        {/* Neck Opening */}
+        <mesh position={[0, 0.52, 0]}>
+          <cylinderGeometry args={[0.26, 0.28, 0.1, 10]} />
+          <meshPhysicalMaterial
+            color="#080808"
+            roughness={0.2}
+            metalness={0.9}
+            envMapIntensity={3}
+          />
+        </mesh>
+
+        {/* Hood */}
+        <mesh position={[0, 0.8, -0.1]} rotation={[0.08, 0, 0]}>
+          <sphereGeometry args={[0.38, 10, 10, 0, Math.PI * 2, 0, Math.PI * 0.72]} />
+          <meshPhysicalMaterial
+            color="#050505"
+            roughness={0.2}
+            metalness={0.92}
+            envMapIntensity={4}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+
+        {/* Left Sleeve */}
+        <mesh position={[-0.72, 0.1, 0]} rotation={[0, 0, 0.4]}>
+          <cylinderGeometry args={[0.2, 0.15, 1.0, 10]} />
+          <meshPhysicalMaterial
+            color="#070707"
+            roughness={0.22}
+            metalness={0.9}
+            envMapIntensity={3.5}
+          />
+        </mesh>
+
+        {/* Right Sleeve */}
+        <mesh position={[0.72, 0.1, 0]} rotation={[0, 0, -0.4]}>
+          <cylinderGeometry args={[0.2, 0.15, 1.0, 10]} />
+          <meshPhysicalMaterial
+            color="#070707"
+            roughness={0.22}
+            metalness={0.9}
+            envMapIntensity={3.5}
+          />
+        </mesh>
+      </group>
     </Float>
   );
 }
@@ -158,7 +189,7 @@ function Scene() {
       <Stars radius={70} depth={35} count={1800} factor={1.6} saturation={0} fade speed={0.25} />
       <Sparkles count={70} scale={8} size={1.2} speed={0.18} color="#ffffff" opacity={0.35} />
       <Sparkles count={18} scale={5} size={2.5} speed={0.12} color="#cc2200" opacity={0.55} />
-      <DarkOrb />
+      <HoodieMockup />
       <CrystalShards />
       <Particles />
       <PedestalRing />

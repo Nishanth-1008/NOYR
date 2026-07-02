@@ -4,9 +4,10 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Menu, Heart, ShoppingBag, Gift } from 'lucide-react';
+import { X, Menu, Heart, ShoppingBag, Gift, User as UserIcon } from 'lucide-react';
 import { useCart } from './CartContext';
 import { useWishlist } from './WishlistContext';
+import { useAuth } from './AuthContext';
 
 const NAV_LINKS = [
   { href: '/collections', label: 'SHOP' },
@@ -16,43 +17,45 @@ const NAV_LINKS = [
   { href: '/journal', label: 'JOURNAL' },
 ];
 
-const MENU_SECTIONS = [
-  {
-    label: 'SHOP',
-    links: [
-      { href: '/collections', label: 'All Collections' },
-      { href: '/collections/void-season-01', label: 'Void Season 01' },
-      { href: '/collections/ghost-protocol', label: 'Ghost Protocol' },
-      { href: '/drops', label: 'Upcoming Drops' },
-      { href: '/build-your-look', label: 'Build Your Look' },
-    ],
-  },
-  {
-    label: 'UNIVERSE',
-    links: [
-      { href: '/universe', label: 'Brand World' },
-      { href: '/lookbook', label: 'Lookbook' },
-      { href: '/journal', label: 'Journal' },
-      { href: '/about', label: 'About NOYR' },
-    ],
-  },
-  {
-    label: 'ACCOUNT',
-    links: [
-      { href: '/rewards', label: 'Rewards' },
-      { href: '/wishlist', label: 'Wishlist' },
-      { href: '/track-order', label: 'Track Order' },
-      { href: '/newsletter', label: 'Newsletter' },
-    ],
-  },
-];
-
 export default function Navigation() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const { count } = useCart();
   const { count: wishlistCount } = useWishlist();
+  const { user } = useAuth();
   const pathname = usePathname();
+
+  const MENU_SECTIONS = [
+    {
+      label: 'SHOP',
+      links: [
+        { href: '/collections', label: 'All Collections' },
+        { href: '/collections/void-season-01', label: 'Void Season 01' },
+        { href: '/collections/ghost-protocol', label: 'Ghost Protocol' },
+        { href: '/drops', label: 'Upcoming Drops' },
+        { href: '/build-your-look', label: 'Build Your Look' },
+      ],
+    },
+    {
+      label: 'UNIVERSE',
+      links: [
+        { href: '/universe', label: 'Brand World' },
+        { href: '/lookbook', label: 'Lookbook' },
+        { href: '/journal', label: 'Journal' },
+        { href: '/about', label: 'About NOYR' },
+      ],
+    },
+    {
+      label: 'ACCOUNT',
+      links: [
+        { href: user ? '/account' : '/login', label: user ? 'Account Profile' : 'Sign In / Register' },
+        { href: '/rewards', label: 'Rewards' },
+        { href: '/wishlist', label: 'Wishlist' },
+        { href: '/track-order', label: 'Track Order' },
+        { href: '/newsletter', label: 'Newsletter' },
+      ],
+    },
+  ];
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 60);
@@ -110,6 +113,13 @@ export default function Navigation() {
 
           {/* Right icons */}
           <div className="flex items-center gap-4">
+            <Link
+              href={user ? "/account" : "/login"}
+              className="hidden lg:flex items-center gap-1.5 text-[11px] tracking-[0.15em] text-white/40 hover:text-white transition-colors"
+              title="Account"
+            >
+              <UserIcon size={13} />
+            </Link>
             <Link
               href="/rewards"
               className="hidden lg:flex items-center gap-1.5 text-[11px] tracking-[0.15em] text-white/40 hover:text-white transition-colors"

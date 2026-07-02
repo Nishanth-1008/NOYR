@@ -9,6 +9,7 @@ import { Order } from '@/types';
 import { generateOrderId } from '@/lib/orders';
 import { saveLocalOrder } from '@/lib/orders';
 import { captureCartEmail, clearCartEmail } from '@/lib/abandonedCart';
+import { useAuth } from '@/components/AuthContext';
 
 const UPI_ID = process.env.NEXT_PUBLIC_UPI_ID ?? 'noyr@upi';
 
@@ -46,6 +47,7 @@ interface FormData {
 export default function CheckoutPage() {
   const { items, total, clearCart } = useCart();
   const router = useRouter();
+  const { user } = useAuth();
 
   const [step, setStep]   = useState(0);
   const [loading, setLoading] = useState(false);
@@ -60,12 +62,16 @@ export default function CheckoutPage() {
   const [uploading, setUploading]   = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Phase 3: referral code
-  const [referralCode, setReferralCode]   = useState('');
-  const [referralInput, setReferralInput] = useState('');
-  const [referralDiscount, setReferralDiscount] = useState(0);
-  const [referralError, setReferralError]       = useState('');
-  const [checkingReferral, setCheckingReferral] = useState(false);
+  // Unified Coupon & Referral state
+  const [promoInput, setPromoInput] = useState('');
+  const [appliedPromo, setAppliedPromo] = useState<{
+    code: string;
+    type: 'coupon' | 'referral';
+    discountType: 'percent' | 'flat';
+    discountValue: number;
+  } | null>(null);
+  const [promoError, setPromoError] = useState('');
+  const [checkingPromo, setCheckingPromo] = useState(false);
 
   // Capture email for abandoned cart when user types it
   useEffect(() => {
@@ -74,29 +80,73 @@ export default function CheckoutPage() {
     }
   }, [form.email]);
 
-  const discountedTotal = Math.round(total * (1 - referralDiscount / 100));
+  // Autofill user details
+  useEffect(() => {
+    if (user) {
+      setForm(f => ({
+        ...f,
+        name: f.name || user.user_metadata?.full_name || '',
+        email: f.email || user.email || '',
+      }));
+    }
+  }, [user]);
+
+  let discountAmount = 0;
+  if (appliedPromo) {
+    if (appliedPromo.discountType === 'percent') {
+      discountAmount = Math.round(total * (appliedPromo.discountValue / 100));
+    } else {
+      discountAmount = Math.round(appliedPromo.discountValue);
+    }
+  }
+  const discountedTotal = Math.max(0, total - discountAmount);
 
   const formatPrice = (p: number) =>
     new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(p);
 
-  /* ── Referral validation ── */
-  const applyReferral = async () => {
-    if (!referralInput.trim()) return;
-    setCheckingReferral(true);
-    setReferralError('');
+  /* ── Promo Code validation (Unified Coupons & Referrals) ── */
+  const applyPromoCode = async () => {
+    const code = promoInput.trim().toUpperCase();
+    if (!code) return;
+    setCheckingPromo(true);
+    setPromoError('');
+
     try {
-      const res = await fetch(`/api/referral?code=${referralInput.trim().toUpperCase()}`);
-      const data = await res.json();
-      if (data.valid) {
-        setReferralCode(data.code);
-        setReferralDiscount(data.discount ?? 0);
-      } else {
-        setReferralError('Invalid referral code.');
+      // 1. Try Coupon Validate
+      const couponRes = await fetch(`/api/coupons/validate?code=${code}`);
+      const couponData = await couponRes.json();
+      
+      if (couponData.valid) {
+        setAppliedPromo({
+          code,
+          type: 'coupon',
+          discountType: couponData.type,
+          discountValue: couponData.value,
+        });
+        setCheckingPromo(false);
+        return;
       }
+
+      // 2. Try Referral Validate
+      const referralRes = await fetch(`/api/referral?code=${code}`);
+      const referralData = await referralRes.json();
+
+      if (referralData.valid) {
+        setAppliedPromo({
+          code,
+          type: 'referral',
+          discountType: 'percent',
+          discountValue: referralData.discount ?? 5,
+        });
+        setCheckingPromo(false);
+        return;
+      }
+
+      setPromoError(couponData.error || 'Invalid code.');
     } catch {
-      setReferralError('Could not verify code. Try again.');
+      setPromoError('Could not verify code. Try again.');
     }
-    setCheckingReferral(false);
+    setCheckingPromo(false);
   };
 
   /* ── Validation ── */
@@ -146,7 +196,9 @@ export default function CheckoutPage() {
       status:         'pending',
       payment_status: 'submitted',
       notes:          form.notes || undefined,
-      referral_code:  referralCode || undefined,
+      referral_code:  (appliedPromo?.type === 'referral' ? appliedPromo.code : undefined),
+      coupon_code:    (appliedPromo?.type === 'coupon' ? appliedPromo.code : undefined),
+      user_id:        user?.id || undefined,
       items: items.map((item, idx) => ({
         id:            `${id}-${idx}`,
         order_id:      id,
@@ -268,43 +320,53 @@ export default function CheckoutPage() {
                     ))}
                   </div>
                   <div className="mt-8 pt-6 border-t border-white/8 space-y-3">
-                    {/* Referral code field */}
+                    {/* Promo/Discount code field */}
                     <div>
-                      <p className="text-[10px] tracking-[0.3em] text-white/25 mb-3">REFERRAL CODE (OPTIONAL)</p>
-                      {referralCode ? (
-                        <div className="flex items-center gap-2 text-green-400 text-xs tracking-widest">
-                          <Tag size={12} />
-                          {referralCode} — {referralDiscount}% off applied
+                      <p className="text-[10px] tracking-[0.3em] text-white/25 mb-3">DISCOUNT OR REFERRAL CODE (OPTIONAL)</p>
+                      {appliedPromo ? (
+                        <div className="flex items-center justify-between text-green-400 text-xs tracking-widest bg-green-400/5 border border-green-500/20 px-3 py-2">
+                          <span className="flex items-center gap-2">
+                            <Tag size={12} />
+                            {appliedPromo.code} — {appliedPromo.discountType === 'percent' ? `${appliedPromo.discountValue}%` : `₹${appliedPromo.discountValue}`} off applied
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => { setAppliedPromo(null); setPromoInput(''); }}
+                            className="text-white/40 hover:text-white/80 transition-colors text-[9px] border border-white/10 hover:border-white/30 px-2 py-0.5 tracking-wider"
+                          >
+                            REMOVE
+                          </button>
                         </div>
                       ) : (
                         <div className="flex gap-2">
                           <input
-                            value={referralInput}
-                            onChange={e => setReferralInput(e.target.value.toUpperCase())}
-                            onKeyDown={e => e.key === 'Enter' && applyReferral()}
+                            value={promoInput}
+                            onChange={e => setPromoInput(e.target.value.toUpperCase())}
+                            onKeyDown={e => e.key === 'Enter' && applyPromoCode()}
                             placeholder="ENTER CODE"
                             className="flex-1 bg-black border border-white/10 px-4 py-2.5 text-sm text-white placeholder:text-white/15 focus:outline-none focus:border-white/30 font-mono tracking-widest"
                           />
                           <button
-                            onClick={applyReferral}
-                            disabled={checkingReferral || !referralInput}
+                            type="button"
+                            onClick={applyPromoCode}
+                            disabled={checkingPromo || !promoInput.trim()}
                             className="bg-white/10 hover:bg-white/20 text-white px-4 text-xs tracking-[0.15em] transition-colors disabled:opacity-40"
                           >
-                            {checkingReferral ? '...' : 'APPLY'}
+                            {checkingPromo ? '...' : 'APPLY'}
                           </button>
                         </div>
                       )}
-                      {referralError && <p className="text-red-400 text-[10px] tracking-widest mt-2">{referralError}</p>}
+                      {promoError && <p className="text-red-400 text-[10px] tracking-widest mt-2">{promoError}</p>}
                     </div>
 
                     <div className="flex justify-between text-white/40 text-sm pt-2">
                       <span className="tracking-[0.2em] text-[11px]">SUBTOTAL</span>
                       <span>{formatPrice(total)}</span>
                     </div>
-                    {referralDiscount > 0 && (
+                    {discountAmount > 0 && (
                       <div className="flex justify-between text-green-400 text-sm">
-                        <span className="tracking-[0.2em] text-[11px]">DISCOUNT ({referralDiscount}%)</span>
-                        <span>−{formatPrice(total - discountedTotal)}</span>
+                        <span className="tracking-[0.2em] text-[11px]">DISCOUNT</span>
+                        <span>−{formatPrice(discountAmount)}</span>
                       </div>
                     )}
                     <div className="flex justify-between font-semibold text-white tracking-wider pt-3 border-t border-white/8">

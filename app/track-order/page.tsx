@@ -21,51 +21,79 @@ function getStatusIndex(status: Order['status']) {
 function TrackContent() {
   const params = useSearchParams();
   const [inputId, setInputId] = useState(params.get('id') || '');
+  const [contactInput, setContactInput] = useState('');
   const [order, setOrder] = useState<Order | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [searching, setSearching] = useState(false);
 
   const formatPrice = (p: number) =>
     new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(p);
 
-  const handleSearch = () => {
-    setNotFound(false);
-    try {
-      const orders: Order[] = JSON.parse(localStorage.getItem('noyr_orders') || '[]');
-      const found = orders.find(o => o.id === inputId.trim().toUpperCase());
-      if (found) { setOrder(found); }
-      else { setOrder(null); setNotFound(true); }
-    } catch {
-      setOrder(null); setNotFound(true);
+  const handleSearch = async () => {
+    if (!inputId.trim() || !contactInput.trim()) {
+      setErrorMessage('Order ID and Email/Phone are required.');
+      return;
     }
+    setNotFound(false);
+    setErrorMessage('');
+    setSearching(true);
+    setOrder(null);
+    try {
+      const isEmail = contactInput.includes('@');
+      const paramName = isEmail ? 'email' : 'phone';
+      const res = await fetch(`/api/orders/lookup?id=${inputId.trim()}&${paramName}=${encodeURIComponent(contactInput.trim())}`);
+      const data = await res.json();
+      if (data.success && data.order) {
+        setOrder(data.order);
+      } else {
+        setNotFound(true);
+        setErrorMessage(data.error ?? 'Order not found.');
+      }
+    } catch {
+      setNotFound(true);
+      setErrorMessage('Could not connect to the server. Try again.');
+    }
+    setSearching(false);
   };
 
   const statusIdx = order ? getStatusIndex(order.status) : -1;
 
   return (
-    <div className="bg-black min-h-screen pt-24">
+    <div className="bg-black min-h-screen pt-24 text-white">
       <div className="max-w-2xl mx-auto px-6 py-16">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-          <h1 className="font-display text-5xl font-black text-white tracking-widest mb-12">TRACK ORDER</h1>
+          <h1 className="font-display text-5xl font-black tracking-widest mb-12">TRACK ORDER</h1>
 
-          <div className="flex gap-3">
+          <div className="flex flex-col gap-3">
             <input
               type="text"
               value={inputId}
               onChange={e => setInputId(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleSearch()}
-              placeholder="Enter your order ID (e.g. ORD-ABC123)"
-              className="flex-1 bg-zinc-900 border border-white/10 focus:border-white text-white text-sm px-4 py-3 outline-none transition-colors placeholder:text-white/20"
+              placeholder="Order ID (e.g. ORD-ABC123)"
+              className="bg-zinc-900 border border-white/10 focus:border-white text-white text-sm px-4 py-3 outline-none transition-colors placeholder:text-white/20 font-mono tracking-widest"
             />
-            <button
-              onClick={handleSearch}
-              className="bg-white text-black px-6 py-3 hover:bg-white/90 transition-colors flex items-center gap-2"
-            >
-              <Search size={16} />
-            </button>
+            <div className="flex gap-3">
+              <input
+                type="text"
+                value={contactInput}
+                onChange={e => setContactInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSearch()}
+                placeholder="Email address or Phone number used"
+                className="flex-1 bg-zinc-900 border border-white/10 focus:border-white text-white text-sm px-4 py-3 outline-none transition-colors placeholder:text-white/20"
+              />
+              <button
+                onClick={handleSearch}
+                disabled={searching}
+                className="bg-white text-black px-6 py-3 hover:bg-white/90 transition-colors flex items-center justify-center gap-2 font-semibold text-xs tracking-widest disabled:opacity-40"
+              >
+                {searching ? '...' : <Search size={16} />}
+              </button>
+            </div>
           </div>
 
-          {notFound && (
-            <p className="mt-4 text-sm text-red-400 tracking-widest">Order not found. Check your ID and try again.</p>
+          {errorMessage && (
+            <p className="mt-4 text-xs text-red-400 tracking-widest leading-relaxed uppercase">{errorMessage}</p>
           )}
 
           {order && (

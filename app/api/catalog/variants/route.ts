@@ -1,6 +1,42 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdminAuthed } from '@/lib/admin-auth';
 
+export async function POST(req: NextRequest) {
+  if (!isAdminAuthed(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  try {
+    const body = await req.json();
+    const { product_id, size, color, sku, price, stock } = body;
+    if (!product_id || !size || !sku || price === undefined) {
+      return NextResponse.json({ error: 'product_id, size, sku, and price are required' }, { status: 400 });
+    }
+
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const variantId = `v-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+
+    const newVariant = {
+      id: variantId,
+      product_id,
+      size,
+      color: color || 'Black',
+      sku,
+      price: Number(price),
+      stock: Number(stock ?? 0),
+    };
+
+    if (supabaseUrl) {
+      const { getSupabaseAdmin } = await import('@/lib/supabase-server');
+      const db = getSupabaseAdmin() as any;
+      const { error } = await db.from('variants').insert(newVariant);
+      if (error) throw error;
+    }
+
+    return NextResponse.json({ ok: true, variant: newVariant });
+  } catch (err: any) {
+    console.error('[catalog/variants POST]', err);
+    return NextResponse.json({ error: err.message ?? 'Failed' }, { status: 500 });
+  }
+}
+
 export async function PATCH(req: NextRequest) {
   if (!isAdminAuthed(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   try {
@@ -76,5 +112,27 @@ export async function PATCH(req: NextRequest) {
   } catch (err) {
     console.error('[catalog/variants PATCH]', err);
     return NextResponse.json({ error: 'Failed' }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  if (!isAdminAuthed(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
+    if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
+
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (supabaseUrl) {
+      const { getSupabaseAdmin } = await import('@/lib/supabase-server');
+      const db = getSupabaseAdmin() as any;
+      const { error } = await db.from('variants').delete().eq('id', id);
+      if (error) throw error;
+    }
+
+    return NextResponse.json({ ok: true });
+  } catch (err: any) {
+    console.error('[catalog/variants DELETE]', err);
+    return NextResponse.json({ error: err.message ?? 'Failed' }, { status: 500 });
   }
 }

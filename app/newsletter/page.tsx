@@ -23,9 +23,22 @@ export default function NewsletterPage() {
     if (!email.includes('@')) { setError('Enter a valid email.'); return; }
     setError('');
     setLoading(true);
-    await new Promise(r => setTimeout(r, 900));
+    try {
+      const res = await fetch('/api/newsletter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? 'Failed to subscribe.');
+      } else {
+        setSubmitted(true);
+      }
+    } catch {
+      setError('Could not reach the server. Try again.');
+    }
     setLoading(false);
-    setSubmitted(true);
   };
 
   return (

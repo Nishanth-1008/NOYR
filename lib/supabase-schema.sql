@@ -233,9 +233,10 @@ create policy "Anyone can create referral"    on public.referrals for insert wit
 create policy "Anyone can subscribe newsletter" on public.newsletter_subscribers for insert with check (true);
 
 -- ── Storage bucket ──────────────────────────────────────────────────
--- Run this after creating the schema:
--- insert into storage.buckets (id, name, public) values ('noyr-uploads', 'noyr-uploads', true)
--- on conflict do nothing;
+insert into storage.buckets (id, name, public) values ('noyr-uploads', 'noyr-uploads', true)
+on conflict do nothing;
+create policy "Public read uploads"   on storage.objects for select using (bucket_id = 'noyr-uploads');
+create policy "Authenticated upload"  on storage.objects for insert with check (bucket_id = 'noyr-uploads');
 
 -- ══════════════════════════════════════════════════════════════════
 -- UPGRADE MIGRATIONS (run if upgrading from Phase 2/3)
@@ -312,3 +313,39 @@ insert into public.variants (id, product_id, size, color, sku, price, stock) val
 ('v-004-m','prod-004','M','Black','VOID-JKT-BLK-M',7499,10),
 ('v-004-l','prod-004','L','Black','VOID-JKT-BLK-L',7499,8)
 on conflict (id) do nothing;
+
+-- ── profiles table + auth trigger ──────────────────────────────────
+create table if not exists public.profiles (
+  id            uuid primary key references auth.users(id) on delete cascade,
+  email         text not null,
+  full_name     text,
+  avatar_url    text,
+  referral_code text unique,
+  created_at    timestamptz not null default now()
+);
+
+create or replace function public.handle_new_user() returns trigger as $$
+begin
+  insert into public.profiles (id, email, full_name, avatar_url)
+  values (new.id, new.email, new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'avatar_url');
+  return new;
+end; $$ language plpgsql security definer;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+alter table public.profiles enable row level security;
+drop policy if exists "Users read own profile" on public.profiles;
+drop policy if exists "Users update own profile" on public.profiles;
+create policy "Users read own profile"   on public.profiles for select using (auth.uid() = id);
+create policy "Users update own profile" on public.profiles for update using (auth.uid() = id);
+
+-- orders.user_id 
+alter table public.orders add column if not exists user_id uuid references auth.users(id);
+
+-- RLS Select policies for users to fetch their own order history
+create policy "Users read own orders" on public.orders for select using (auth.uid() = user_id);
+create policy "Users read own order items" on public.order_items for select using (exists (select 1 from public.orders where orders.id = order_items.order_id and orders.user_id = auth.uid()));
+create policy "Users read own payments" on public.payments for select using (exists (select 1 from public.orders where orders.id = payments.order_id and orders.user_id = auth.uid()));
+

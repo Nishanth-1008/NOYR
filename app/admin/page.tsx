@@ -147,6 +147,147 @@ function ProductForm({
 
   const [saveError, setSaveError] = useState('');
 
+  // Variants state & handlers
+  const [variants, setVariants] = useState<Variant[]>(product?.variants ?? []);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [savingVariantId, setSavingVariantId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setVariants(product?.variants ?? []);
+  }, [product?.variants]);
+
+  const handleUploadImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingImage(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('folder', 'products');
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: fd,
+      });
+      const data = await res.json();
+      if (data.url) {
+        setImagesText(prev => prev ? `${prev}\n${data.url}` : data.url);
+      } else {
+        alert(data.error ?? 'Upload failed');
+      }
+    } catch {
+      alert('Upload failed');
+    }
+    setUploadingImage(false);
+  };
+
+  const handleAddVariant = (size: string = '') => {
+    const tempId = `temp-${Math.random().toString(36).slice(2, 7)}`;
+    setVariants(prev => [...prev, {
+      id: tempId,
+      product_id: product?.id ?? '',
+      size: size,
+      color: 'Black',
+      sku: `${(product?.title ?? 'PROD').toUpperCase().slice(0, 4).replace(/[^A-Z]/g, '')}-${size || 'SZ'}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`,
+      price: product?.price ?? 0,
+      stock: 0,
+    }]);
+  };
+
+  const handleUpdateVariantField = (vid: string, field: keyof Variant, value: any) => {
+    setVariants(prev => prev.map(v => v.id === vid ? { ...v, [field]: value } : v));
+  };
+
+  const handleSaveVariant = async (v: Variant) => {
+    if (!v.size || !v.sku || v.price === undefined) {
+      alert('Size, SKU, and Price are required.');
+      return;
+    }
+    setSavingVariantId(v.id);
+    try {
+      const isNewVariant = v.id.startsWith('temp-');
+      const method = isNewVariant ? 'POST' : 'PATCH';
+      const url = '/api/catalog/variants';
+
+      const payload = isNewVariant ? {
+        product_id: product!.id,
+        size: v.size,
+        color: v.color || 'Black',
+        sku: v.sku,
+        price: Number(v.price),
+        stock: Number(v.stock ?? 0),
+      } : {
+        variant_id: v.id,
+        product_id: product!.id,
+        price: Number(v.price),
+        stock: Number(v.stock ?? 0),
+      };
+
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json', 'x-admin-key': 'noyr2025' },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        alert(json.error ?? 'Failed to save variant');
+        setSavingVariantId(null);
+        return;
+      }
+
+      if (isNewVariant) {
+        addVariantToProduct(product!.id, {
+          size: v.size,
+          color: v.color || 'Black',
+          sku: v.sku,
+          price: Number(v.price),
+          stock: Number(v.stock ?? 0),
+        });
+      } else {
+        updateVariant(product!.id, v.id, {
+          price: Number(v.price),
+          stock: Number(v.stock ?? 0),
+        });
+      }
+
+      const updatedVariant = json.variant || v;
+      const nextVariants = isNewVariant 
+        ? [...variants.filter(x => x.id !== v.id), updatedVariant]
+        : variants.map(x => x.id === v.id ? updatedVariant : x);
+
+      setVariants(nextVariants);
+      onSave({ ...product!, variants: nextVariants });
+      alert('Variant saved successfully');
+    } catch (err) {
+      alert('Failed to save variant');
+    }
+    setSavingVariantId(null);
+  };
+
+  const handleDeleteVariant = async (vid: string) => {
+    if (vid.startsWith('temp-')) {
+      setVariants(prev => prev.filter(v => v.id !== vid));
+      return;
+    }
+    if (!confirm('Are you sure you want to delete this variant?')) return;
+    try {
+      const res = await fetch(`/api/catalog/variants?id=${vid}`, {
+        method: 'DELETE',
+        headers: { 'x-admin-key': 'noyr2025' },
+      });
+      if (!res.ok) {
+        alert('Failed to delete variant');
+        return;
+      }
+      deleteVariant(product!.id, vid);
+      const nextVariants = variants.filter(v => v.id !== vid);
+      setVariants(nextVariants);
+      onSave({ ...product!, variants: nextVariants });
+    } catch {
+      alert('Failed to delete variant');
+    }
+  };
+
   const handleSave = async () => {
     if (!form.title || !form.price) return;
     setSaving(true);
@@ -172,8 +313,6 @@ function ProductForm({
         return;
       }
       const serverProduct: Product = json.product;
-      // Keep the local cache in sync too, so storefront pages without
-      // Supabase configured still see something sane.
       if (isNew) {
         createLocalProduct({ ...serverProduct } as Omit<Product, 'id' | 'variants'>);
       } else {
@@ -245,7 +384,24 @@ function ProductForm({
       <Textarea label="STORY (displayed on product page)" value={form.story ?? ''} onChange={set('story')} rows={2} />
 
       <div className="flex flex-col gap-1">
-        <label className="text-[10px] tracking-[0.3em] text-white/30">IMAGE URLS (one per line)</label>
+        <div className="flex justify-between items-center">
+          <label className="text-[10px] tracking-[0.3em] text-white/30">IMAGE URLS (one per line)</label>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadingImage}
+            className="text-[10px] tracking-[0.15em] text-white/50 hover:text-white transition-colors"
+          >
+            {uploadingImage ? 'UPLOADING...' : '✦ UPLOAD IMAGE'}
+          </button>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleUploadImage}
+            accept="image/*"
+            className="hidden"
+          />
+        </div>
         <textarea
           value={imagesText}
           onChange={e => setImagesText(e.target.value)}
@@ -274,6 +430,137 @@ function ProductForm({
         <Toggle label="Active (visible on storefront)" checked={form.active ?? true} onChange={set('active')} />
         <Toggle label="Limited drop" checked={form.limited ?? false} onChange={set('limited')} />
       </div>
+
+      {/* Variants Editor Section */}
+      {!isNew && (
+        <div className="border-t border-white/10 pt-5 mt-3">
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <p className="text-[10px] tracking-[0.3em] text-white/30">PRODUCT VARIANTS</p>
+              <p className="text-[9px] text-white/15 mt-0.5">Define sizes and current inventory</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleAddVariant('')}
+                className="flex items-center gap-1.5 border border-white/10 hover:border-white/30 px-3 py-1.5 text-[10px] tracking-wider text-white/50 hover:text-white transition-all"
+              >
+                <Plus size={11} /> ADD VARIANT
+              </button>
+            </div>
+          </div>
+
+          {/* Quick add size chips */}
+          <div className="flex items-center gap-2 mb-4 flex-wrap">
+            <span className="text-[9px] tracking-widest text-white/20">QUICK ADD SIZE:</span>
+            {SIZES.map(sz => (
+              <button
+                key={sz}
+                type="button"
+                onClick={() => handleAddVariant(sz)}
+                className="text-[9px] tracking-widest px-2 py-0.5 border border-white/10 hover:border-white/35 text-white/40 hover:text-white/70 transition-colors"
+              >
+                +{sz}
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-3">
+            {variants.length === 0 ? (
+              <p className="text-xs text-white/20 italic text-center py-6 border border-dashed border-white/8">No sizes defined. Add one above.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-white/5">
+                      <th className="py-2 text-white/25 text-[9px] tracking-widest font-normal">SIZE</th>
+                      <th className="py-2 text-white/25 text-[9px] tracking-widest font-normal">COLOR</th>
+                      <th className="py-2 text-white/25 text-[9px] tracking-widest font-normal">SKU</th>
+                      <th className="py-2 text-white/25 text-[9px] tracking-widest font-normal">PRICE</th>
+                      <th className="py-2 text-white/25 text-[9px] tracking-widest font-normal">STOCK</th>
+                      <th className="py-2 text-white/25 text-[9px] tracking-widest font-normal text-right"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {variants.map(v => {
+                      const isTemp = v.id.startsWith('temp-');
+                      return (
+                        <tr key={v.id} className="border-b border-white/5 align-middle">
+                          <td className="py-2.5 pr-2">
+                            <input
+                              type="text"
+                              value={v.size}
+                              disabled={!isTemp}
+                              onChange={e => handleUpdateVariantField(v.id, 'size', e.target.value)}
+                              placeholder="e.g. S"
+                              className="w-12 bg-black border border-white/8 text-white px-1.5 py-1 text-center outline-none focus:border-white/25 font-semibold text-[11px] disabled:opacity-40 disabled:border-transparent"
+                            />
+                          </td>
+                          <td className="py-2.5 pr-2">
+                            <input
+                              type="text"
+                              value={v.color}
+                              disabled={!isTemp}
+                              onChange={e => handleUpdateVariantField(v.id, 'color', e.target.value)}
+                              className="w-16 bg-black border border-white/8 text-white px-1.5 py-1 outline-none focus:border-white/25 text-[11px] disabled:opacity-40 disabled:border-transparent"
+                            />
+                          </td>
+                          <td className="py-2.5 pr-2">
+                            <input
+                              type="text"
+                              value={v.sku}
+                              disabled={!isTemp}
+                              onChange={e => handleUpdateVariantField(v.id, 'sku', e.target.value)}
+                              className="w-28 bg-black border border-white/8 text-white px-1.5 py-1 font-mono text-[10px] outline-none focus:border-white/25 disabled:opacity-40 disabled:border-transparent"
+                            />
+                          </td>
+                          <td className="py-2.5 pr-2">
+                            <input
+                              type="number"
+                              value={v.price}
+                              onChange={e => handleUpdateVariantField(v.id, 'price', Number(e.target.value))}
+                              className="w-16 bg-black border border-white/8 text-white px-1.5 py-1 outline-none focus:border-white/25 text-[11px]"
+                            />
+                          </td>
+                          <td className="py-2.5 pr-2">
+                            <input
+                              type="number"
+                              value={v.stock}
+                              onChange={e => handleUpdateVariantField(v.id, 'stock', Number(e.target.value))}
+                              className="w-14 bg-black border border-white/8 text-white px-1.5 py-1 outline-none focus:border-white/25 text-[11px]"
+                            />
+                          </td>
+                          <td className="py-2.5 text-right">
+                            <div className="flex justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleSaveVariant(v)}
+                                disabled={savingVariantId === v.id}
+                                className="flex items-center justify-center w-7 h-7 bg-white text-black hover:bg-white/95 transition-colors disabled:opacity-40"
+                                title="Save variant"
+                              >
+                                <Save size={11} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteVariant(v.id)}
+                                className="flex items-center justify-center w-7 h-7 border border-red-500/20 hover:border-red-500/40 text-red-400/70 hover:text-red-400 transition-colors"
+                                title="Delete variant"
+                              >
+                                <Trash2 size={11} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -300,6 +587,33 @@ function CollectionForm({
     setForm(f => ({ ...f, [k]: v }));
 
   const [saveError, setSaveError] = useState('');
+
+  const colFileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingColImage, setUploadingColImage] = useState(false);
+
+  const handleUploadColImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingColImage(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('folder', 'collections');
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: fd,
+      });
+      const data = await res.json();
+      if (data.url) {
+        set('banner_image')(data.url);
+      } else {
+        alert(data.error ?? 'Upload failed');
+      }
+    } catch {
+      alert('Upload failed');
+    }
+    setUploadingColImage(false);
+  };
 
   const linkedProducts = products.filter(p => p.collection_id === collection?.id);
 
@@ -364,7 +678,35 @@ function CollectionForm({
         <Input label="SLUG" value={form.slug ?? ''} onChange={set('slug')} className="col-span-2" />
       </div>
       <Input label="HERO TEXT (large headline on collection page)" value={form.hero_text ?? ''} onChange={set('hero_text')} />
-      <Input label="BANNER IMAGE URL" value={form.banner_image ?? ''} onChange={set('banner_image')} placeholder="/images/collection-void.jpg" />
+      
+      <div className="flex flex-col gap-1">
+        <div className="flex justify-between items-center">
+          <label className="text-[10px] tracking-[0.3em] text-white/30">BANNER IMAGE URL</label>
+          <button
+            type="button"
+            onClick={() => colFileInputRef.current?.click()}
+            disabled={uploadingColImage}
+            className="text-[10px] tracking-[0.15em] text-white/50 hover:text-white transition-colors"
+          >
+            {uploadingColImage ? 'UPLOADING...' : '✦ UPLOAD BANNER'}
+          </button>
+          <input
+            type="file"
+            ref={colFileInputRef}
+            onChange={handleUploadColImage}
+            accept="image/*"
+            className="hidden"
+          />
+        </div>
+        <input
+          type="text"
+          value={form.banner_image ?? ''}
+          onChange={e => set('banner_image')(e.target.value)}
+          placeholder="/images/collection-void.jpg"
+          className="bg-black border border-white/10 focus:border-white/30 text-white text-sm px-3 py-2.5 outline-none transition-colors placeholder:text-white/15"
+        />
+      </div>
+
       <Textarea label="DESCRIPTION" value={form.description ?? ''} onChange={set('description')} rows={4} />
 
       {/* URL preview */}

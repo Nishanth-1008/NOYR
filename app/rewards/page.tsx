@@ -2,8 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Copy, Check, Gift, Star, Zap, ArrowUpRight, Share2 } from 'lucide-react';
+import { Copy, Check, Gift, Star, Zap, ArrowUpRight, Share2, Loader2, LogIn } from 'lucide-react';
 import Link from 'next/link';
+import { useAuth } from '@/components/AuthContext';
+import { supabase } from '@/lib/supabase-browser';
 
 /* ── Tiers ── */
 const TIERS = [
@@ -19,29 +21,6 @@ const TIER_PERKS: Record<string, string[]> = {
   VOID: ['Early access to drops (72hr)', '10% loyalty discount', 'Free express shipping', 'Exclusive colourways'],
   ECLIPSE: ['Priority early access (1 week)', '15% loyalty discount', 'Free overnight shipping', 'Private drops & collabs', 'Direct line to studio'],
 };
-
-/* ── Mock order history for demo ── */
-const MOCK_ORDERS = [
-  { id: 'N-2025-001', date: '2025-05-01', total: 4999, status: 'delivered', points: 500 },
-  { id: 'N-2025-002', date: '2025-06-10', total: 5999, status: 'delivered', points: 600 },
-];
-
-function useRewards() {
-  const [email, setEmail] = useState('');
-  const [code] = useState('NOYR-' + Math.random().toString(36).slice(2, 7).toUpperCase());
-  const [copied, setCopied] = useState(false);
-  const totalSpent = MOCK_ORDERS.reduce((a, o) => a + o.total, 0);
-  const points = Math.floor(totalSpent / 10);
-  const tier = TIERS.find(t => points >= t.min && points <= t.max) ?? TIERS[0];
-
-  const copy = () => {
-    navigator.clipboard.writeText(code).catch(() => {});
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  return { email, setEmail, code, copied, copy, points, tier, totalSpent };
-}
 
 /* ── Progress bar ── */
 function TierProgress({ points, tier }: { points: number; tier: typeof TIERS[0] }) {
@@ -78,20 +57,84 @@ function TierProgress({ points, tier }: { points: number; tier: typeof TIERS[0] 
 }
 
 export default function RewardsPage() {
-  const { email, setEmail, code, copied, copy, points, tier, totalSpent } = useRewards();
-  const [registered, setRegistered] = useState(false);
+  const { user, loading: authLoading, signInWithGoogle } = useAuth();
   const [tab, setTab] = useState<'overview' | 'history' | 'perks'>('overview');
+  
+  // Rewards & Referrals state
+  const [orders, setOrders] = useState<any[]>([]);
+  const [referralCode, setReferralCode] = useState('');
+  const [loadingData, setLoadingData] = useState(true);
+  const [copied, setCopied] = useState(false);
+
+  const totalSpent = orders.reduce((a, o) => a + Number(o.total), 0);
+  const points = Math.floor(totalSpent / 10);
+  const tier = TIERS.find(t => points >= t.min && points <= t.max) ?? TIERS[0];
+
+  useEffect(() => {
+    const fetchRewardsData = async () => {
+      if (!user) return;
+      setLoadingData(true);
+      try {
+        // 1. Fetch referral code
+        const refRes = await fetch('/api/referral', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: user.email,
+            name: user.user_metadata?.full_name || 'NOYR Member',
+          }),
+        });
+        const refData = await refRes.json();
+        if (refData.code) {
+          setReferralCode(refData.code);
+        }
+
+        // 2. Fetch verified orders via RLS
+        const { data: ords } = await supabase
+          .from('orders')
+          .select('*, order_items(*)')
+          .eq('user_id', user.id)
+          .eq('payment_status', 'verified');
+
+        if (ords) {
+          setOrders(ords);
+        }
+      } catch (err) {
+        console.error(err);
+      }
+      setLoadingData(false);
+    };
+
+    if (user) {
+      fetchRewardsData();
+    }
+  }, [user]);
+
+  const copyReferral = () => {
+    if (!referralCode) return;
+    navigator.clipboard.writeText(referralCode).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   const formatPrice = (p: number) =>
     new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(p);
 
+  if (authLoading) {
+    return (
+      <div className="bg-black min-h-screen flex items-center justify-center">
+        <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+      </div>
+    );
+  }
+
   return (
-    <div className="bg-black min-h-screen pt-24">
+    <div className="bg-black min-h-screen pt-24 text-white">
       <div className="max-w-[1100px] mx-auto px-8 md:px-16 py-16">
         {/* Header */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-16">
           <p className="text-[10px] tracking-[0.5em] text-white/20 mb-4">NOYR</p>
-          <h1 className="font-display text-6xl md:text-8xl font-black text-white leading-none tracking-tight">
+          <h1 className="font-display text-6xl md:text-8xl font-black leading-none tracking-tight">
             REWARDS
           </h1>
           <p className="mt-4 text-white/35 text-sm max-w-sm leading-relaxed">
@@ -101,7 +144,7 @@ export default function RewardsPage() {
 
         {/* Registration gating */}
         <AnimatePresence mode="wait">
-          {!registered ? (
+          {!user ? (
             <motion.div
               key="register"
               initial={{ opacity: 0 }}
@@ -109,20 +152,14 @@ export default function RewardsPage() {
               exit={{ opacity: 0 }}
               className="border border-white/8 p-10 md:p-14 max-w-lg"
             >
-              <h2 className="font-display text-3xl font-black text-white mb-2">ENTER THE PROGRAM</h2>
-              <p className="text-white/35 text-sm mb-8">Enter your email to view or create your rewards account.</p>
-              <input
-                type="email"
-                placeholder="your@email.com"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                className="w-full bg-transparent border-b border-white/15 focus:border-white/40 text-white text-base py-3 outline-none transition-colors placeholder:text-white/20 mb-6"
-              />
+              <h2 className="font-display text-3xl font-black mb-2">ENTER THE PROGRAM</h2>
+              <p className="text-white/35 text-sm mb-8">Sign in with Google to view or create your rewards account.</p>
+              
               <button
-                onClick={() => { if (email.includes('@')) setRegistered(true); }}
-                className="bg-white text-black px-8 py-3.5 text-[11px] tracking-[0.3em] font-semibold hover:bg-white/90 transition-colors"
+                onClick={signInWithGoogle}
+                className="bg-white text-black px-8 py-3.5 text-[11px] tracking-[0.3em] font-semibold hover:bg-white/90 transition-colors flex items-center gap-2"
               >
-                ACCESS REWARDS
+                <LogIn size={13} /> ACCESS REWARDS
               </button>
             </motion.div>
           ) : (
@@ -176,7 +213,7 @@ export default function RewardsPage() {
                       {[
                         { icon: <Star size={14} />, label: 'POINTS', value: points.toLocaleString('en-IN') },
                         { icon: <Gift size={14} />, label: 'TOTAL SPENT', value: formatPrice(totalSpent) },
-                        { icon: <Zap size={14} />, label: 'ORDERS', value: MOCK_ORDERS.length },
+                        { icon: <Zap size={14} />, label: 'VERIFIED ORDERS', value: orders.length },
                       ].map(s => (
                         <div key={s.label} className="border border-white/8 p-6 flex flex-col gap-3">
                           <span className="text-white/25">{s.icon}</span>
@@ -194,16 +231,20 @@ export default function RewardsPage() {
                         <Share2 size={11} /> YOUR REFERRAL CODE
                       </p>
                       <div className="flex items-center gap-3">
-                        <span className="font-mono text-2xl font-bold text-white tracking-widest">{code}</span>
-                        <button
-                          onClick={copy}
-                          className="flex items-center gap-2 border border-white/15 hover:border-white px-4 py-2 text-[10px] tracking-[0.2em] text-white/40 hover:text-white transition-all"
-                        >
-                          {copied ? <><Check size={11} /> COPIED</> : <><Copy size={11} /> COPY</>}
-                        </button>
+                        <span className="font-mono text-2xl font-bold text-white tracking-widest">
+                          {loadingData ? 'FETCHING...' : referralCode || 'NO CODE YET'}
+                        </span>
+                        {referralCode && (
+                          <button
+                            onClick={copyReferral}
+                            className="flex items-center gap-2 border border-white/15 hover:border-white px-4 py-2 text-[10px] tracking-[0.2em] text-white/40 hover:text-white transition-all font-semibold"
+                          >
+                            {copied ? <><Check size={11} /> COPIED</> : <><Copy size={11} /> COPY</>}
+                          </button>
+                        )}
                       </div>
                       <p className="mt-3 text-[11px] text-white/25 leading-relaxed">
-                        Share this code. Your friends get ₹250 off. You earn 500 points for each referral.
+                        Share this code. Your friends get 5% off. You earn points for each referral.
                       </p>
                     </div>
 
@@ -230,37 +271,47 @@ export default function RewardsPage() {
                 {tab === 'history' && (
                   <motion.div key="history" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                     <div className="flex flex-col gap-2">
-                      {MOCK_ORDERS.map((order, i) => (
-                        <motion.div
-                          key={order.id}
-                          initial={{ opacity: 0, y: 12 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: i * 0.08 }}
-                          className="border border-white/8 p-6 grid grid-cols-2 md:grid-cols-4 gap-4 items-center"
-                        >
-                          <div>
-                            <p className="text-[9px] tracking-[0.3em] text-white/20 mb-1">ORDER</p>
-                            <p className="text-sm font-mono text-white/70">{order.id}</p>
-                          </div>
-                          <div>
-                            <p className="text-[9px] tracking-[0.3em] text-white/20 mb-1">DATE</p>
-                            <p className="text-sm text-white/50">{new Date(order.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
-                          </div>
-                          <div>
-                            <p className="text-[9px] tracking-[0.3em] text-white/20 mb-1">TOTAL</p>
-                            <p className="text-sm text-white/70">{formatPrice(order.total)}</p>
-                          </div>
-                          <div className="flex items-center justify-between md:justify-end gap-4">
+                      {loadingData ? (
+                        <div className="flex items-center justify-center py-12 text-white/40">
+                          <Loader2 size={16} className="animate-spin mr-2" /> Fetching order history...
+                        </div>
+                      ) : orders.length === 0 ? (
+                        <div className="border border-white/8 p-12 text-center text-white/20 text-xs tracking-widest">
+                          NO VERIFIED ORDERS YET
+                        </div>
+                      ) : (
+                        orders.map((order, i) => (
+                          <motion.div
+                            key={order.id}
+                            initial={{ opacity: 0, y: 12 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: i * 0.08 }}
+                            className="border border-white/8 p-6 grid grid-cols-2 md:grid-cols-4 gap-4 items-center"
+                          >
                             <div>
-                              <p className="text-[9px] tracking-[0.3em] text-white/20 mb-1">POINTS</p>
-                              <p className="text-sm text-[#cc0000] font-semibold">+{order.points}</p>
+                              <p className="text-[9px] tracking-[0.3em] text-white/20 mb-1 font-semibold">ORDER</p>
+                              <p className="text-sm font-mono text-white/70">{order.id}</p>
                             </div>
-                            <Link href="/track-order" className="text-white/20 hover:text-white transition-colors">
-                              <ArrowUpRight size={14} />
-                            </Link>
-                          </div>
-                        </motion.div>
-                      ))}
+                            <div>
+                              <p className="text-[9px] tracking-[0.3em] text-white/20 mb-1 font-semibold">DATE</p>
+                              <p className="text-sm text-white/50">{new Date(order.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+                            </div>
+                            <div>
+                              <p className="text-[9px] tracking-[0.3em] text-white/20 mb-1 font-semibold">TOTAL</p>
+                              <p className="text-sm text-white/70">{formatPrice(order.total)}</p>
+                            </div>
+                            <div className="flex items-center justify-between md:justify-end gap-4">
+                              <div>
+                                <p className="text-[9px] tracking-[0.3em] text-white/20 mb-1 font-semibold">POINTS</p>
+                                <p className="text-sm text-[#cc0000] font-semibold">+{Math.floor(order.total / 10)}</p>
+                              </div>
+                              <Link href={`/track-order?id=${order.id}`} className="text-white/20 hover:text-white transition-colors">
+                                <ArrowUpRight size={14} />
+                              </Link>
+                            </div>
+                          </motion.div>
+                        ))
+                      )}
                     </div>
                   </motion.div>
                 )}
